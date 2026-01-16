@@ -1,141 +1,278 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle,
   Clock,
   Utensils,
   Layers,
-  ChefHat,
-  Flame,
   Package,
   RefreshCw,
   Filter,
   AlertCircle,
 } from "lucide-react";
-
-const mockOrders = [
-  {
-    id: 201,
-    type: "single",
-    time: "11:10 AM",
-    status: "pending",
-    items: [
-      { name: "Cheese Pizza", qty: 1 },
-      { name: "Cold Coffee", qty: 2 },
-    ],
-  },
-  {
-    id: 202,
-    type: "combo",
-    time: "11:15 AM",
-    status: "pending",
-    comboName: "Family Combo",
-    items: [
-      { name: "Paneer Butter Masala", qty: 1 },
-      { name: "Butter Naan", qty: 4 },
-      { name: "Jeera Rice", qty: 1 },
-    ],
-  },
-  {
-    id: 203,
-    type: "single",
-    table: "Takeaway #12",
-    time: "11:25 AM",
-    status: "ready",
-    items: [
-      { name: "Veg Burger", qty: 2 },
-      { name: "French Fries", qty: 1 },
-      { name: "Coke", qty: 2 },
-    ],
-  },
-  {
-    id: 204,
-    type: "combo",
-    time: "11:30 AM",
-    status: "pending",
-    comboName: "Lunch Special",
-    items: [
-      { name: "Veg Biryani", qty: 1 },
-      { name: "Raita", qty: 1 },
-      { name: "Salad", qty: 1 },
-    ],
-  },
-  {
-    id: 205,
-    type: "single",
-    time: "11:35 AM",
-    status: "pending",
-    items: [
-      { name: "Chocolate Cake", qty: 1 },
-      { name: "Cappuccino", qty: 1 },
-    ],
-  },
-  {
-    id: 206,
-    type: "combo",
-    time: "11:40 AM",
-    status: "pending",
-    comboName: "Party Pack",
-    items: [
-      { name: "veg Paneer kadai", qty: 20 },
-      { name: "Garlic Bread", qty: 2 },
-      { name: "Soft Drinks", qty: 4 },
-    ],
-  },
-];
+import { toast, ToastContainer } from "react-toastify";
+import axiosInstance from "../../api/axiosInstance";
 
 export default function OrderList() {
-  const [orders, setOrders] = useState(mockOrders);
-  const [filter, setFilter] = useState("all"); 
-  const [sortBy, setSortBy] = useState("time"); 
+  const [orders, setOrders] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("time");
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 0,
+    hasNextPage: false,
+  });
 
-  const markAsReady = (id) => {
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === id ? { ...o, status: "ready" } : o
-      )
-    );
+  const fetchOrders = async (page = 1) => {
+    try {
+      setLoading(true);
+      const response = await axiosInstance.get(
+        `/api/v1/order/all?limit=${pagination.limit}&page=${page}`
+      );
+
+      if (response.data.message === "Orders fetched successfully") {
+        const transformedOrders = response.data.data.map((order) => ({
+          id: order.id,
+          token: order.token,
+          type: order.combo_items?.length > 0 ? "combo" : "single",
+          time: new Date(order.created_at).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          date: new Date(order.created_at).toLocaleDateString(),
+          status: order.status.toLowerCase(),
+          statusOriginal: order.status,
+          comboName: order.combo_items?.[0]?.combo_name || null,
+          grand_total: order.grand_total,
+          notes: order.notes,
+          items: [
+            ...order.single_items.map((item) => ({
+              name: item.product_name,
+              qty: item.quantity,
+              price: item.price,
+              total: item.total,
+              type: "single",
+              extras: item.extra,
+              product_id: item.product_id,
+            })),
+            ...order.combo_items.map((item) => ({
+              name: item.combo_name,
+              qty: item.quantity,
+              price: item.price,
+              total: item.total,
+              type: "combo",
+              details: item.details,
+              extras: item.extra,
+              combo_id: item.combo_id,
+            })),
+          ],
+          single_items: order.single_items,
+          combo_items: order.combo_items,
+        }));
+
+        setOrders(transformedOrders);
+        setPagination(response.data.pagination);
+      }
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      if (error.response?.status === 401) {
+      } else if (error.response?.data?.message) {
+        console.error("API Error:", error.response.data.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateOrderStatus = async (id, status) => {
+    try {
+      const response = await axiosInstance.put(`/api/v1/order/status`, {
+        id,
+        status,
+      });
+
+      if (response.data.message === "Order status updated successfully") {
+        setOrders((prev) =>
+          prev.map((order) =>
+            order.id === id
+              ? {
+                  ...order,
+                  status: status.toLowerCase(),
+                  statusOriginal: status,
+                }
+              : order
+          )
+        );
+
+        // ✅ SUCCESS TOAST
+        toast.success("Order is Completed");
+
+        return true;
+      }
+    } catch (error) {
+      console.error("Error updating order status:", error);
+
+      toast.error(
+        error.response?.data?.message || "Failed to update order status"
+      );
+
+      return false;
+    }
+  };
+
+  const markAsReady = async (id) => {
+    const success = await updateOrderStatus(id, "COMPLETED");
+
+    if (success) {
+      console.log(`Order ${id} marked as completed`);
+    }
+  };
+
+  const loadMore = () => {
+    if (pagination.hasNextPage) {
+      fetchOrders(pagination.page + 1);
+    }
   };
 
   const refreshOrders = () => {
-    // Simulate getting new orders
-    const newOrder = {
-      id: Math.floor(Math.random() * 300) + 207,
-      type: Math.random() > 0.5 ? "single" : "combo",
-      table: Math.random() > 0.5 ? `Table ${Math.floor(Math.random() * 10) + 1}` : `Takeaway #${Math.floor(Math.random() * 20) + 1}`,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      status: "pending",
-      comboName: Math.random() > 0.5 ? "Family Combo" : "Lunch Special",
-      items: [
-        { name: "Sample Item", qty: 1 },
-        { name: "Drink", qty: 2 },
-      ],
-    };
-    
-    setOrders(prev => [newOrder, ...prev]);
+    fetchOrders(1);
   };
 
-  const filteredAndSortedOrders = orders
-    .filter(order => {
+  useEffect(() => {
+    fetchOrders();
+
+    const intervalId = setInterval(() => {
+      fetchOrders(pagination.page);
+    }, 30000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const activeOrders = orders.filter((order) => order.status !== "cancelled");
+
+  const filteredAndSortedOrders = activeOrders
+    .filter((order) => {
       if (filter === "all") return true;
-      return order.status === filter;
+      if (filter === "placed") return order.status === "placed";
+      if (filter === "ready") return order.status === "completed";
+      return true;
     })
     .sort((a, b) => {
       if (sortBy === "time") {
-        return new Date(`1970/01/01 ${a.time}`) - new Date(`1970/01/01 ${b.time}`);
-      } else if (sortBy === "table") {
-        return a.table.localeCompare(b.table);
-      } else {
+        return (
+          new Date(b.created_at || b.date + " " + b.time) -
+          new Date(a.created_at || a.date + " " + a.time)
+        );
+      } else if (sortBy === "token") {
+        return b.token - a.token;
+      } else if (sortBy === "type") {
         return a.type.localeCompare(b.type);
+      } else if (sortBy === "status") {
+        const statusOrder = {
+          placed: 0,
+          completed: 1,
+        };
+        return (statusOrder[a.status] || 2) - (statusOrder[b.status] || 2);
+      } else if (sortBy === "amount") {
+        return b.grand_total - a.grand_total;
       }
+      return 0;
     });
 
-  const pendingCount = orders.filter(o => o.status === "pending").length;
-  const readyCount = orders.filter(o => o.status === "ready").length;
+  const placedCount = activeOrders.filter((o) => o.status === "placed").length;
+  const readyCount = activeOrders.filter(
+    (o) => o.status === "completed"
+  ).length;
+  const pendingCount = placedCount;
+
+  const getStatusDisplay = (status) => {
+    const statusMap = {
+      placed: "Placed",
+      completed: "Ready",
+    };
+    return statusMap[status] || status;
+  };
+
+  const getStatusColor = (status) => {
+    const colorMap = {
+      placed: { bg: "bg-yellow-100", text: "text-yellow-700" },
+      completed: { bg: "bg-green-100", text: "text-green-700" },
+    };
+    return colorMap[status] || { bg: "bg-gray-100", text: "text-gray-700" };
+  };
+
+  const getStatusLineColor = (status) => {
+    const colorMap = {
+      placed: "bg-linear-to-r from-yellow-400 to-amber-400",
+      completed: "bg-linear-to-r from-green-400 to-emerald-400",
+    };
+    return colorMap[status] || "bg-gray-400";
+  };
+
+  const renderExtras = (extras) => {
+    if (!extras || extras.length === 0) return null;
+
+    return (
+      <div className="ml-6 mt-2 border-l-2 border-amber-300 pl-3">
+        <div className="text-xs font-medium text-amber-600 mb-1">Extras:</div>
+        {extras.map((extra, idx) => (
+          <div
+            key={idx}
+            className="text-xs text-gray-600 mb-1 flex items-center justify-between"
+          >
+            <span>
+              + {extra.name} (x{extra.quantity})
+            </span>
+            <span className="font-medium">
+              ₹{extra.total_price || extra.unit_price * extra.quantity}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderComboDetails = (details) => {
+    if (!details || details.length === 0) return null;
+
+    return (
+      <div className="ml-6 mt-2 border-l-2 border-purple-300 pl-3">
+        <div className="text-xs font-medium text-purple-600 mb-1">
+          Includes:
+        </div>
+        {details.map((detail, idx) => (
+          <div
+            key={idx}
+            className="text-xs text-gray-600 mb-1 flex items-center justify-between"
+          >
+            <span>
+              • {detail.product_name} (x{detail.quantity})
+            </span>
+            <span className="text-gray-500 line-through">
+              ₹{detail.original_unit_price}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const formatPrice = (amount) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
 
   return (
     <div className="min-h-screen bg-linear-to-br from-amber-50 to-orange-50 p-4 md:p-6">
       {/* Header Section */}
+      <ToastContainer />
       <header className="mb-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -143,72 +280,66 @@ export default function OrderList() {
               <Utensils className="text-white" size={32} />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Kitchen Dashboard</h1>
-              <p className="text-gray-600">Manage and track food orders in real-time</p>
+              <h1 className="text-3xl font-bold text-gray-900">
+                Kitchen Dashboard
+              </h1>
+              <p className="text-gray-600">
+                Manage and track food orders in real-time
+              </p>
             </div>
           </div>
-          
           <div className="flex items-center gap-3">
             <div className="hidden md:flex items-center gap-4 bg-white/80 backdrop-blur-sm rounded-xl p-3 shadow-sm">
               <div className="text-center">
-                <div className="text-2xl font-bold text-yellow-500">{pendingCount}</div>
+                <div className="text-2xl font-bold text-yellow-500">
+                  {pendingCount}
+                </div>
                 <div className="text-xs text-gray-500">Pending</div>
               </div>
               <div className="h-8 w-px bg-gray-200"></div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">{readyCount}</div>
+                <div className="text-2xl font-bold text-green-600">
+                  {readyCount}
+                </div>
                 <div className="text-xs text-gray-500">Ready</div>
               </div>
             </div>
-            
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={refreshOrders}
-              className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg transition-shadow"
+              disabled={loading}
+              className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg transition-shadow disabled:opacity-50"
             >
-              <RefreshCw size={20} className="text-amber-600" />
+              <RefreshCw
+                size={20}
+                className={`text-amber-600 ${loading ? "animate-spin" : ""}`}
+              />
             </motion.button>
           </div>
         </div>
       </header>
 
-      {/* Stats & Controls Section */}
-      <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-linear-to-r from-yellow-500 to-yellow-400 rounded-2xl p-5 text-white shadow-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold">Active Orders</h3>
-              <p className="text-3xl font-bold mt-2">{orders.length}</p>
-            </div>
-            <Flame size={32} className="opacity-80" />
+      {/* Stats Overview - Only Placed & Ready */}
+      <div className="mb-6 grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <div className="text-3xl font-bold text-yellow-500">
+            {placedCount}
           </div>
-          <p className="text-sm opacity-90 mt-2">Currently being prepared</p>
+          <div className="text-sm text-gray-500">Placed</div>
         </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-800">Chef's Station</h3>
-              <p className="text-2xl font-bold mt-2 text-gray-900">{pendingCount}</p>
-            </div>
-            <ChefHat size={32} className="text-amber-600" />
-          </div>
-          <p className="text-sm text-gray-600 mt-2">Orders in progress</p>
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <div className="text-3xl font-bold text-green-500">{readyCount}</div>
+          <div className="text-sm text-gray-500">Ready</div>
         </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-800">Ready for Pickup</h3>
-              <p className="text-2xl font-bold mt-2 text-green-600">{readyCount}</p>
-            </div>
-            <Package size={32} className="text-green-500" />
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <div className="text-3xl font-bold text-gray-500">
+            {activeOrders.length}
           </div>
-          <p className="text-sm text-gray-600 mt-2">Awaiting delivery</p>
+          <div className="text-sm text-gray-500">Active</div>
         </div>
       </div>
 
-      {/* Filters Section */}
+      {/* Filters Section - No Cancelled Filter */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-2">
           <button
@@ -222,14 +353,14 @@ export default function OrderList() {
             All Orders
           </button>
           <button
-            onClick={() => setFilter("pending")}
+            onClick={() => setFilter("placed")}
             className={`px-4 py-2 rounded-full font-medium transition-all ${
-              filter === "pending"
+              filter === "placed"
                 ? "bg-linear-to-r from-yellow-500 to-yellow-400 text-white shadow-md"
                 : "bg-white text-gray-700 hover:bg-gray-50 shadow-sm"
             }`}
           >
-            Pending
+            Placed ({placedCount})
           </button>
           <button
             onClick={() => setFilter("ready")}
@@ -239,10 +370,9 @@ export default function OrderList() {
                 : "bg-white text-gray-700 hover:bg-gray-50 shadow-sm"
             }`}
           >
-            Ready
+            Ready ({readyCount})
           </button>
         </div>
-
         <div className="flex items-center gap-2 bg-white rounded-lg p-2 shadow-sm">
           <Filter size={18} className="text-gray-500" />
           <select
@@ -251,152 +381,229 @@ export default function OrderList() {
             className="bg-transparent border-none focus:ring-0 text-gray-700"
           >
             <option value="time">Sort by Time</option>
-            <option value="table">Sort by Table</option>
+            <option value="token">Sort by Token</option>
             <option value="type">Sort by Type</option>
+            <option value="status">Sort by Status</option>
+            <option value="amount">Sort by Amount</option>
           </select>
         </div>
       </div>
 
+      {/* Loading State */}
+      {loading && activeOrders.length === 0 && (
+        <div className="text-center py-16">
+          <RefreshCw
+            size={48}
+            className="text-amber-600 animate-spin mx-auto mb-4"
+          />
+          <h3 className="text-xl font-bold text-gray-800">Loading orders...</h3>
+        </div>
+      )}
+
       {/* Orders Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        <AnimatePresence>
-          {filteredAndSortedOrders.map((order) => (
-            <motion.div
-              key={order.id}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ duration: 0.2 }}
-              whileHover={{ y: -4 }}
-              className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100"
-            >
-              {/* Order Status Header */}
-              <div
-                className={`h-2 w-full ${
-                  order.status === "pending"
-                    ? "bg-linear-to-r from-amber-400 to-yellow-400"
-                    : "bg-linear-to-r from-green-400 to-emerald-400"
-                }`}
-              ></div>
+      {!loading && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            <AnimatePresence>
+              {filteredAndSortedOrders.map((order) => {
+                const statusColor = getStatusColor(order.status);
+                const statusLineColor = getStatusLineColor(order.status);
 
-              <div className="p-6 flex flex-col h-full">
-                {/* Header */}
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h2 className="font-bold text-xl text-gray-900">
-                        Token No : {order.id}
-                      </h2>
-                      {order.status === "pending" ? (
-                        <span className="px-2 py-1 text-xs font-bold bg-amber-100 text-amber-700 rounded-full">
-                          Preparing
-                        </span>
-                      ) : (
-                        <span className="px-2 py-1 text-xs font-bold bg-green-100 text-green-700 rounded-full">
-                          Ready
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-gray-600 font-medium">{order.table}</p>
-                  </div>
-
-                  <div className="flex flex-col items-end">
-                    <div className="flex items-center gap-1 text-amber-600 font-semibold">
-                      <Clock size={16} />
-                      {order.time}
-                    </div>
-                    {order.type === "combo" && (
-                      <div className="mt-2 text-xs font-medium bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
-                        <Layers size={12} className="inline mr-1" />
-                        Combo
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Combo Name */}
-                {order.type === "combo" && (
-                  <div className="mb-4 p-3 bg-linear-to-r from-purple-50 to-violet-50 rounded-xl border border-purple-100">
-                    <div className="flex items-center gap-2">
-                      <Layers className="text-purple-600" size={18} />
-                      <span className="font-bold text-purple-700">{order.comboName}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Items */}
-                <div className="grow mb-6">
-                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <Utensils size={16} className="text-amber-600" />
-                    Order Items
-                  </h3>
-                  <div className="space-y-3">
-                    {order.items.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="flex justify-between items-center p-2 hover:bg-amber-50 rounded-lg transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-amber-400"></div>
-                          <span className="text-gray-800">{item.name}</span>
+                return (
+                  <motion.div
+                    key={order.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.2 }}
+                    whileHover={{ y: -4 }}
+                    className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100"
+                  >
+                    {/* Order Status Header */}
+                    <div className={`h-2 w-full ${statusLineColor}`}></div>
+                    <div className="p-6 flex flex-col h-full">
+                      {/* Header */}
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <h2 className="font-bold text-xl text-gray-900">
+                              Token No: {order.token}
+                            </h2>
+                            <span
+                              className={`px-2 py-1 text-xs font-bold rounded-full ${statusColor.bg} ${statusColor.text}`}
+                            >
+                              {getStatusDisplay(order.status)}
+                            </span>
+                          </div>
+                          <p className="text-gray-600 text-sm">
+                            Order ID: {order.id} •{" "}
+                            {formatPrice(order.grand_total)}
+                          </p>
+                          {order.notes && (
+                            <p className="text-sm text-gray-500 mt-1 italic">
+                              <span className="font-medium">Note:</span>{" "}
+                              {order.notes}
+                            </p>
+                          )}
                         </div>
-                        <span className="font-bold text-gray-900 bg-amber-100 px-2 py-1 rounded">
-                          x{item.qty}
-                        </span>
+                        <div className="flex flex-col items-end">
+                          <div className="flex items-center gap-1 text-amber-600 font-semibold">
+                            <Clock size={16} />
+                            {order.time}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {order.date}
+                          </div>
+                          {order.type === "combo" && (
+                            <div className="mt-2 text-xs font-medium bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                              <Layers size={12} className="inline mr-1" />
+                              Combo
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-                {/* Action Button */}
-                <div className="mt-auto">
-                  {order.status === "pending" ? (
-                    <motion.button
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => markAsReady(order.id)}
-                      className="w-full bg-linear-to-r from-yellow-500 to-yellow-400 hover:from-yellow-600 hover:to-yellow-500 text-white py-3 cursor-pointer rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all"
-                    >
-                      <CheckCircle size={20} />
-                      Mark as Ready
-                    </motion.button>
-                  ) : (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="w-full bg-linear-to-r from-green-100 to-emerald-100 border border-green-200 text-green-800 py-3 rounded-xl text-center font-bold flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle size={20} />
-                      Ready for Pickup
-                    </motion.div>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+                      {/* Combo Name */}
+                      {order.comboName && (
+                        <div className="mb-4 p-3 bg-linear-to-r from-purple-50 to-violet-50 rounded-xl border border-purple-100">
+                          <div className="flex items-center gap-2">
+                            <Layers className="text-purple-600" size={18} />
+                            <span className="font-bold text-purple-700">
+                              {order.comboName}
+                            </span>
+                            {order.combo_items?.[0]?.savings_percentage && (
+                              <span className="ml-auto text-sm font-bold text-green-600">
+                                Save {order.combo_items[0].savings_percentage}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
-      {filteredAndSortedOrders.length === 0 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center py-16"
-        >
-          <div className="inline-flex p-6 rounded-full bg-amber-100 mb-4">
-            <AlertCircle size={48} className="text-amber-600" />
+                      {/* Items */}
+                      <div className="grow mb-6">
+                        <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                          <Utensils size={16} className="text-amber-600" />
+                          Order Items ({order.items.length})
+                        </h3>
+                        <div className="space-y-3">
+                          {order.items.map((item, idx) => (
+                            <div key={idx}>
+                              <div className="flex justify-between items-center p-2 hover:bg-amber-50 rounded-lg transition-colors">
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    className={`w-2 h-2 rounded-full ${
+                                      item.type === "combo"
+                                        ? "bg-purple-400"
+                                        : "bg-amber-400"
+                                    }`}
+                                  ></div>
+                                  <div className="max-w-[200px]">
+                                    <span className="text-gray-800 font-medium">
+                                      {item.name}
+                                    </span>
+                                    <div className="text-xs text-gray-500">
+                                      {formatPrice(item.price)} each
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-bold text-gray-900 bg-amber-100 px-2 py-1 rounded">
+                                    x{item.qty}
+                                  </span>
+                                  <div className="text-sm font-bold text-gray-800 mt-1">
+                                    {formatPrice(item.total)}
+                                  </div>
+                                </div>
+                              </div>
+                              {renderExtras(item.extras)}
+                              {renderComboDetails(item.details)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="mt-auto space-y-2">
+                        {order.status === "placed" && (
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => markAsReady(order.id)}
+                            className="w-full bg-linear-to-r from-green-500 to-green-400 hover:from-green-600 hover:to-green-500 text-white py-3 cursor-pointer rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all"
+                          >
+                            <CheckCircle size={20} />
+                            Mark as Ready
+                          </motion.button>
+                        )}
+                        {order.status === "completed" && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="w-full bg-linear-to-r from-green-100 to-emerald-100 border border-green-200 text-green-800 py-3 rounded-xl text-center font-bold flex items-center justify-center gap-2"
+                          >
+                            <Package size={20} />
+                            Ready for Pickup
+                          </motion.div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
-          <h3 className="text-2xl font-bold text-gray-800 mb-2">No orders found</h3>
-          <p className="text-gray-600 max-w-md mx-auto">
-            {filter === "all"
-              ? "There are no orders in the system. New orders will appear here automatically."
-              : `No ${filter} orders at the moment. Try a different filter.`}
-          </p>
-        </motion.div>
+
+          {/* Load More Button */}
+          {pagination.hasNextPage && (
+            <div className="mt-8 text-center">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={loadMore}
+                disabled={loading}
+                className="px-6 py-3 bg-white border border-amber-300 text-amber-700 rounded-xl font-medium hover:bg-amber-50 transition-colors disabled:opacity-50"
+              >
+                {loading ? "Loading..." : "Load More Orders"}
+              </motion.button>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {filteredAndSortedOrders.length === 0 && !loading && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center py-16"
+            >
+              <div className="inline-flex p-6 rounded-full bg-amber-100 mb-4">
+                <AlertCircle size={48} className="text-amber-600" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                No orders found
+              </h3>
+              <p className="text-gray-600 max-w-md mx-auto">
+                {filter === "all"
+                  ? "There are no active orders in the system. New orders will appear here automatically."
+                  : `No ${filter} orders at the moment. Try a different filter.`}
+              </p>
+            </motion.div>
+          )}
+        </>
       )}
 
       {/* Footer Note */}
       <div className="mt-10 text-center text-gray-500 text-sm">
-        <p>Kitchen Dashboard • All orders update in real-time • Last updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+        <p>
+          Kitchen Dashboard • Auto-refreshes every 30 seconds • Showing{" "}
+          {activeOrders.length} active orders
+        </p>
+        <p className="mt-1">
+          Last updated:{" "}
+          {new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
+        </p>
       </div>
     </div>
   );

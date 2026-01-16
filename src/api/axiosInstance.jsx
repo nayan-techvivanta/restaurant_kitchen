@@ -5,7 +5,7 @@ const axiosInstance = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
-  timeout: 10000, 
+  timeout: 10000,
 });
 
 axiosInstance.interceptors.request.use(
@@ -30,14 +30,13 @@ axiosInstance.interceptors.request.use(
 //     // Handle 401 Unauthorized errors
 //     if (error.response && error.response.status === 401) {
 //       localStorage.clear();
-//       window.location.href = "/login"; 
+//       window.location.href = "/login";
 //     }
 //     return Promise.reject(error);
 //   }
 // );
 
 export default axiosInstance;
-
 
 // import axios from "axios";
 
@@ -47,7 +46,6 @@ export default axiosInstance;
 //     "Content-Type": "application/json",
 //   },
 // });
-
 
 // axiosInstance.interceptors.request.use((config) => {
 //   const token = localStorage.getItem("access_token");

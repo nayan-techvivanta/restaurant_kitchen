@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { FiMail, FiLock, FiArrowRight, FiEye, FiEyeOff } from "react-icons/fi";
 import Logo from "../../assets/images/Loginpage/Logo.png";
-import bg01 from "../../assets/images/Loginpage/bg01.jpg";
-import bg02 from "../../assets/images/Loginpage/bg02.jpg";
+import bg01 from "../../assets/images/Loginpage/bg02.jpg";
+import bg02 from "../../assets/images/Loginpage/bg01.jpg";
 import bg03 from "../../assets/images/Loginpage/bg03.jpg";
 import bg04 from "../../assets/images/Loginpage/bg04.jpg";
 import { useNavigate } from "react-router-dom";
@@ -81,7 +81,7 @@ export default function Login() {
     } catch (err) {
       console.error("Login error:", err);
 
-      // API error handling
+      
       if (err.response?.data?.message) {
         toast.error(err.response.data.message);
       } else if (err.response?.status === 401) {
@@ -117,7 +117,7 @@ export default function Login() {
 
       {/* Main Container */}
       <div className="relative w-full max-w-7xl flex flex-col lg:flex-row items-center justify-center lg:justify-between z-10 lg:ps-10 gap-8 lg:gap-0">
-        <div className="hidden md:block text-white max-w-xl space-y-4 lg:space-y-6 m-auto">
+        <div className="hidden md:block text-white  space-y-4 lg:space-y-6 m-auto">
           {/* Title */}
           <h1 className="text-4xl sm:text-5xl xl:text-7xl font-extrabold leading-tight">
             <span className="text-gray-100 block">Welcome To</span>
@@ -129,7 +129,7 @@ export default function Login() {
                 letterSpacing: "1px",
               }}
             >
-              Restaurant Vivanta
+              Kitchen Panel
             </span>
           </h1>
 
@@ -138,9 +138,8 @@ export default function Login() {
 
           {/* Description */}
           <p className="text-base sm:text-lg xl:text-xl text-gray-200 leading-relaxed tracking-wide">
-            Experience a seamless login experience with industry-level security.
-            Enjoy a clean, fast, and user-friendly dashboard trusted by
-            professionals across the hospitality sector.
+           Login to manage live orders, kitchen tokens and
+      prepare food faster with real-time updates.
           </p>
         </div>
 
@@ -261,7 +260,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 sm:py-3.5 text-base sm:text-lg font-semibold rounded-xl bg-linear-to-r from-yellow-500 to-yellow-600 text-black shadow-lg hover:shadow-yellow-500/30 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center space-x-2"
+              className="cursor-pointer w-full py-3 sm:py-3.5 text-base sm:text-lg font-semibold rounded-xl bg-linear-to-r from-yellow-500 to-yellow-600 text-black shadow-lg hover:shadow-yellow-500/30 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center space-x-2"
             >
               {isLoading ? (
                 <>

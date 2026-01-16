@@ -30,9 +30,9 @@ export default function Settings() {
 
   // Profile settings state
   const [profile, setProfile] = useState({
-    name: "Kitchan",
-    email: "kitchan@123.com",
-    phone: "+1 234 567 890",
+    name: "",
+    email: "",
+    phone: "",
     notifications: true,
     twoFactorAuth: false,
     language: "en"
@@ -40,12 +40,12 @@ export default function Settings() {
 
   // Print settings state
   const [print, setPrint] = useState({
-    printerType: "thermal",
-    paperWidth: "80mm",
+    printerType: "",
+    paperWidth: "",
     autoPrint: true,
     copies: 1,
-    header: "Thank you for dining with us!",
-    footer: "Visit us again!",
+    header: "",
+    footer: "",
     kitchenPrint: true,
     cashierPrint: true
   });
@@ -63,7 +63,6 @@ export default function Settings() {
 
   const handleSave = () => {
     setSaving(true);
-    // Simulate API call
     setTimeout(() => {
       setSaving(false);
       setSaveSuccess(true);
@@ -94,7 +93,7 @@ export default function Settings() {
   };
 
   const tabs = [
-    // { id: 'profile', icon: User, label: 'Profile' },
+    { id: 'profile', icon: User, label: 'Profile' },
     { id: 'print', icon: Printer, label: 'Print Settings' },
     { id: 'kitchen', icon: ChefHat, label: 'Kitchen Display' }
   ];
