@@ -30,48 +30,56 @@ export default function OrderList() {
     try {
       setLoading(true);
       const response = await axiosInstance.get(
-        `/api/v1/order/all?limit=${pagination.limit}&page=${page}`
+        `/api/v1/order/all?limit=${pagination.limit}&page=${page}`,
       );
 
       if (response.data.message === "Orders fetched successfully") {
-        const transformedOrders = response.data.data.map((order) => ({
-          id: order.id,
-          token: order.token,
-          type: order.combo_items?.length > 0 ? "combo" : "single",
-          time: new Date(order.created_at).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          date: new Date(order.created_at).toLocaleDateString(),
-          status: order.status.toLowerCase(),
-          statusOriginal: order.status,
-          comboName: order.combo_items?.[0]?.combo_name || null,
-          grand_total: order.grand_total,
-          notes: order.notes,
-          items: [
-            ...order.single_items.map((item) => ({
-              name: item.product_name,
-              qty: item.quantity,
-              price: item.price,
-              total: item.total,
-              type: "single",
-              extras: item.extra,
-              product_id: item.product_id,
-            })),
-            ...order.combo_items.map((item) => ({
-              name: item.combo_name,
-              qty: item.quantity,
-              price: item.price,
-              total: item.total,
-              type: "combo",
-              details: item.details,
-              extras: item.extra,
-              combo_id: item.combo_id,
-            })),
-          ],
-          single_items: order.single_items,
-          combo_items: order.combo_items,
-        }));
+        console.log("Raw API Response Data:", response.data.data); // Debug log
+        const transformedOrders = response.data.data.map((order) => {
+          console.log("Processing Order:", order); // Debug log
+          return {
+            id: order.id,
+            token: order.token,
+            type: order.combo_items?.length > 0 ? "combo" : "single",
+            time: new Date(order.created_at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            date: new Date(order.created_at).toLocaleDateString(),
+            status: order.status.toLowerCase(),
+            statusOriginal: order.status,
+            comboName: order.combo_items?.[0]?.combo_name || null,
+            grand_total: order.grand_total,
+            notes: order.notes,
+            items: [
+              ...order.single_items.map((item) => ({
+                id: item.id, // Capture item ID
+                name: item.product_name,
+                qty: item.quantity,
+                price: item.price,
+                total: item.total,
+                type: "single",
+                extras: item.extra,
+                product_id: item.product_id,
+                status: item.status || "PENDING", // Capture item status
+              })),
+              ...order.combo_items.map((item) => ({
+                id: item.id, // Capture item ID
+                name: item.combo_name,
+                qty: item.quantity,
+                price: item.price,
+                total: item.total,
+                type: "combo",
+                details: item.details,
+                extras: item.extra,
+                combo_id: item.combo_id,
+                status: item.status || "PENDING", // Capture item status
+              })),
+            ],
+            single_items: order.single_items,
+            combo_items: order.combo_items,
+          };
+        });
 
         setOrders(transformedOrders);
         setPagination(response.data.pagination);
@@ -87,49 +95,44 @@ export default function OrderList() {
     }
   };
 
-  const updateOrderStatus = async (id, status) => {
+  const updateItemStatus = async (orderId, itemId, status) => {
+    const formData = {
+      order_id: orderId,
+      item_id: itemId,
+      status: status,
+    };
     try {
-      const response = await axiosInstance.put(`/api/v1/order/status`, {
-        id,
-        status,
-      });
+      const response = await axiosInstance.put(
+        `/api/v1/order/status`,
+        formData,
+      );
 
-      if (response.data.message === "Order status updated successfully") {
+      if (response.data.message === "Order item status updated successfully") {
         setOrders((prev) =>
-          prev.map((order) =>
-            order.id === id
-              ? {
-                  ...order,
-                  status: status.toLowerCase(),
-                  statusOriginal: status,
-                }
-              : order
-          )
+          prev.map((order) => {
+            if (order.id === orderId) {
+              const updatedItems = order.items.map((item) =>
+                item.id === itemId ? { ...item, status: status } : item,
+              );
+              return { ...order, items: updatedItems };
+            }
+            return order;
+          }),
         );
 
-        // ✅ SUCCESS TOAST
-        toast.success("Order is Completed");
-
+        toast.success(`Item marked as ${status}`);
         return true;
       }
     } catch (error) {
-      console.error("Error updating order status:", error);
-
+      console.error("Error updating item status:", error);
       toast.error(
-        error.response?.data?.message || "Failed to update order status"
+        error.response?.data?.message || "Failed to update item status",
       );
-
       return false;
     }
   };
 
-  const markAsReady = async (id) => {
-    const success = await updateOrderStatus(id, "COMPLETED");
-
-    if (success) {
-      console.log(`Order ${id} marked as completed`);
-    }
-  };
+  // markAsReady removed
 
   const loadMore = () => {
     if (pagination.hasNextPage) {
@@ -184,24 +187,35 @@ export default function OrderList() {
 
   const placedCount = activeOrders.filter((o) => o.status === "placed").length;
   const readyCount = activeOrders.filter(
-    (o) => o.status === "completed"
+    (o) => o.status === "completed",
   ).length;
   const pendingCount = placedCount;
 
   const getStatusDisplay = (status) => {
     const statusMap = {
       placed: "Placed",
-      completed: "Ready",
+      pending: "Pending",
+      cooking: "Cooking",
+      ready: "Ready",
+      completed: "Completed",
     };
-    return statusMap[status] || status;
+    return statusMap[status?.toLowerCase()] || status;
   };
 
   const getStatusColor = (status) => {
     const colorMap = {
       placed: { bg: "bg-yellow-100", text: "text-yellow-700" },
+      pending: { bg: "bg-yellow-100", text: "text-yellow-700" },
+      cooking: { bg: "bg-blue-100", text: "text-blue-700" },
+      ready: { bg: "bg-green-100", text: "text-green-700" },
       completed: { bg: "bg-green-100", text: "text-green-700" },
     };
-    return colorMap[status] || { bg: "bg-gray-100", text: "text-gray-700" };
+    return (
+      colorMap[status?.toLowerCase()] || {
+        bg: "bg-gray-100",
+        text: "text-gray-700",
+      }
+    );
   };
 
   const getStatusLineColor = (status) => {
@@ -505,6 +519,11 @@ export default function OrderList() {
                                     <div className="text-xs text-gray-500">
                                       {formatPrice(item.price)} each
                                     </div>
+                                    <div
+                                      className={`text-xs font-bold mt-1 ${getStatusColor(item.status).text}`}
+                                    >
+                                      {getStatusDisplay(item.status)}
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="text-right">
@@ -516,6 +535,41 @@ export default function OrderList() {
                                   </div>
                                 </div>
                               </div>
+
+                              {/* Item Status Actions */}
+                              <div className="flex justify-end gap-2 px-2 pb-2">
+                                {(item.status === "PENDING" ||
+                                  item.status === "placed" ||
+                                  !item.status) && (
+                                  <button
+                                    onClick={() =>
+                                      updateItemStatus(
+                                        order.id,
+                                        item.id,
+                                        "COOKING",
+                                      )
+                                    }
+                                    className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full transition-colors"
+                                  >
+                                    Start Cooking
+                                  </button>
+                                )}
+                                {item.status === "COOKING" && (
+                                  <button
+                                    onClick={() =>
+                                      updateItemStatus(
+                                        order.id,
+                                        item.id,
+                                        "READY",
+                                      )
+                                    }
+                                    className="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-full transition-colors"
+                                  >
+                                    Mark Ready
+                                  </button>
+                                )}
+                              </div>
+
                               {renderExtras(item.extras)}
                               {renderComboDetails(item.details)}
                             </div>
@@ -525,16 +579,7 @@ export default function OrderList() {
 
                       {/* Action Buttons */}
                       <div className="mt-auto space-y-2">
-                        {order.status === "placed" && (
-                          <motion.button
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => markAsReady(order.id)}
-                            className="w-full bg-linear-to-r from-green-500 to-green-400 hover:from-green-600 hover:to-green-500 text-white py-3 cursor-pointer rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all"
-                          >
-                            <CheckCircle size={20} />
-                            Mark as Ready
-                          </motion.button>
-                        )}
+                        {/* Old Mark as Ready Button Removed */}
                         {order.status === "completed" && (
                           <motion.div
                             initial={{ opacity: 0 }}
