@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import Shuffle from "shufflejs";
 import {
   CheckCircle,
   Clock,
@@ -15,28 +16,46 @@ import axiosInstance from "../../api/axiosInstance";
 
 export default function OrderList() {
   const [orders, setOrders] = useState([]);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("placed");
   const [sortBy, setSortBy] = useState("time");
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({
     page: 1,
-    limit: 10,
+    limit: 50,
     total: 0,
     totalPages: 0,
     hasNextPage: false,
   });
 
+  const shuffleRef = useRef(null);
+  const elementRef = useRef(null);
+
   const fetchOrders = async (page = 1) => {
     try {
       setLoading(true);
+      
+      let statusParam = "";
+      if (filter !== "all") {
+        // Handle special case for ready/completed if needed, or just map directly
+        // Backend expects uppercase status
+        const statusMap = {
+          placed: "PLACED",
+          ready: "READY", 
+          cancelled: "CANCELLED",
+          // 'all' logic handled by omitting param
+        };
+        if (statusMap[filter]) {
+           statusParam = `&status=${statusMap[filter]}`;
+        }
+      }
+
       const response = await axiosInstance.get(
-        `/api/v1/order/all?limit=${pagination.limit}&page=${page}`,
+        `/api/v1/order/all?limit=${pagination.limit}&page=${page}${statusParam}`,
       );
 
       if (response.data.message === "Orders fetched successfully") {
-        console.log("Raw API Response Data:", response.data.data); // Debug log
+        console.log("Raw API Response:", response.data.data);
         const transformedOrders = response.data.data.map((order) => {
-          console.log("Processing Order:", order); // Debug log
           return {
             id: order.id,
             token: order.token,
@@ -46,14 +65,18 @@ export default function OrderList() {
               minute: "2-digit",
             }),
             date: new Date(order.created_at).toLocaleDateString(),
+            timestamp: new Date(order.created_at).getTime(),
             status: order.status.toLowerCase(),
             statusOriginal: order.status,
             comboName: order.combo_items?.[0]?.combo_name || null,
             grand_total: order.grand_total,
             notes: order.notes,
+            restaurantType: order.restaurant?.type || "QSR", // Capture restaurant type
+            tableNumber: order.table?.number || null, // Capture table number
             items: [
-              ...order.single_items.map((item) => ({
-                id: item.id, // Capture item ID
+              ...order.single_items
+                .map((item) => ({
+                id: item.item_id, // Capture item ID
                 name: item.product_name,
                 qty: item.quantity,
                 price: item.price,
@@ -63,8 +86,9 @@ export default function OrderList() {
                 product_id: item.product_id,
                 status: item.status || "PENDING", // Capture item status
               })),
-              ...order.combo_items.map((item) => ({
-                id: item.id, // Capture item ID
+              ...order.combo_items
+                .map((item) => ({
+                id: item.item_id, // Capture item ID
                 name: item.combo_name,
                 qty: item.quantity,
                 price: item.price,
@@ -96,6 +120,7 @@ export default function OrderList() {
   };
 
   const updateItemStatus = async (orderId, itemId, status) => {
+
     const formData = {
       order_id: orderId,
       item_id: itemId,
@@ -107,22 +132,12 @@ export default function OrderList() {
         formData,
       );
 
-      if (response.data.message === "Order item status updated successfully") {
-        setOrders((prev) =>
-          prev.map((order) => {
-            if (order.id === orderId) {
-              const updatedItems = order.items.map((item) =>
-                item.id === itemId ? { ...item, status: status } : item,
-              );
-              return { ...order, items: updatedItems };
-            }
-            return order;
-          }),
-        );
+        // Refetch orders to ensure Order Status is updated on backend
+        // This fixes the issue where Item updates but Order Status remains "Placed" locally
+        fetchOrders(pagination.page);
 
         toast.success(`Item marked as ${status}`);
         return true;
-      }
     } catch (error) {
       console.error("Error updating item status:", error);
       toast.error(
@@ -132,7 +147,7 @@ export default function OrderList() {
     }
   };
 
-  // markAsReady removed
+
 
   const loadMore = () => {
     if (pagination.hasNextPage) {
@@ -152,43 +167,90 @@ export default function OrderList() {
     }, 30000);
 
     return () => clearInterval(intervalId);
-  }, []);
+  }, [filter]); // Re-fetch when filter changes
 
-  const activeOrders = orders.filter((order) => order.status !== "cancelled");
+  // React-based Filtering and Sorting
+  const getProcessedOrders = () => {
+    console.log("Filtering Orders. Total:", orders.length);
+    let processed = [...orders]; // allow cancelled
 
-  const filteredAndSortedOrders = activeOrders
-    .filter((order) => {
-      if (filter === "all") return true;
-      if (filter === "placed") return order.status === "placed";
-      if (filter === "ready") return order.status === "completed";
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === "time") {
-        return (
-          new Date(b.created_at || b.date + " " + b.time) -
-          new Date(a.created_at || a.date + " " + a.time)
-        );
-      } else if (sortBy === "token") {
-        return b.token - a.token;
-      } else if (sortBy === "type") {
-        return a.type.localeCompare(b.type);
-      } else if (sortBy === "status") {
-        const statusOrder = {
-          placed: 0,
-          completed: 1,
-        };
-        return (statusOrder[a.status] || 2) - (statusOrder[b.status] || 2);
-      } else if (sortBy === "amount") {
-        return b.grand_total - a.grand_total;
+    // 1. Filter
+    if (filter !== "all") {
+      processed = processed.filter(order => {
+        // Match logic consistent with backend/display
+        if (filter === "ready") return order.status === "ready" || order.status === "completed";
+        return order.status === filter;
+      });
+    }
+
+    // 2. Sort
+    processed.sort((a, b) => {
+      if (sortBy === "time") return b.timestamp - a.timestamp;
+      if (sortBy === "token") return b.token - a.token;
+      if (sortBy === "amount") return b.grand_total - a.grand_total;
+      if (sortBy === "status") {
+        const statusOrder = { placed: 0, pending: 0, cooking: 1, ready: 2, completed: 3 };
+        return (statusOrder[b.status] || 0) - (statusOrder[a.status] || 0);
       }
       return 0;
     });
 
+    return processed;
+  };
+
+  const processedOrders = getProcessedOrders();
+
+  // Robust Shuffle Initialization: Only for Layout (Masonry)
+  useEffect(() => {
+    // 1. Check if we are ready to initialize
+    if (loading || !elementRef.current) {
+      return;
+    }
+
+    // 2. Destroy existing instance if any
+    if (shuffleRef.current) {
+      shuffleRef.current.destroy();
+    }
+
+    // 3. Initialize new instance for Layout only
+    const timer = setTimeout(() => {
+      if (!elementRef.current) return;
+
+      const sizerElement = elementRef.current.querySelector('.sizer-element');
+      
+      shuffleRef.current = new Shuffle(elementRef.current, {
+        itemSelector: ".shuffle-item",
+        sizer: sizerElement || null,
+        speed: 400,
+        easing: 'ease-out',
+        roundTransforms: true,
+        initialSort: null, // We handle sort in React
+      });
+      
+      // Force layout
+      shuffleRef.current.layout();
+    }, 50);
+
+    // 4. Cleanup function
+    return () => {
+      clearTimeout(timer);
+      if (shuffleRef.current) {
+        shuffleRef.current.destroy();
+        shuffleRef.current = null;
+      }
+    };
+  }, [loading, processedOrders]); // Re-run when processed list changes
+
+  // NOTE: Removed separate useEffects for filter/sort as we now use React state 
+
+
+
+  const activeOrders = orders;
   const placedCount = activeOrders.filter((o) => o.status === "placed").length;
   const readyCount = activeOrders.filter(
-    (o) => o.status === "completed",
+    (o) => o.status === "completed" || o.status === "ready",
   ).length;
+  const cancelledCount = activeOrders.filter((o) => o.status === "cancelled").length;
   const pendingCount = placedCount;
 
   const getStatusDisplay = (status) => {
@@ -198,6 +260,7 @@ export default function OrderList() {
       cooking: "Cooking",
       ready: "Ready",
       completed: "Completed",
+      cancelled: "Cancelled",
     };
     return statusMap[status?.toLowerCase()] || status;
   };
@@ -209,6 +272,7 @@ export default function OrderList() {
       cooking: { bg: "bg-blue-100", text: "text-blue-700" },
       ready: { bg: "bg-green-100", text: "text-green-700" },
       completed: { bg: "bg-green-100", text: "text-green-700" },
+      cancelled: { bg: "bg-red-100", text: "text-red-700" },
     };
     return (
       colorMap[status?.toLowerCase()] || {
@@ -222,6 +286,7 @@ export default function OrderList() {
     const colorMap = {
       placed: "bg-linear-to-r from-yellow-400 to-amber-400",
       completed: "bg-linear-to-r from-green-400 to-emerald-400",
+      cancelled: "bg-linear-to-r from-red-400 to-red-500",
     };
     return colorMap[status] || "bg-gray-400";
   };
@@ -351,6 +416,12 @@ export default function OrderList() {
           </div>
           <div className="text-sm text-gray-500">Active</div>
         </div>
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <div className="text-3xl font-bold text-red-500">
+            {cancelledCount}
+          </div>
+          <div className="text-sm text-gray-500">Cancelled</div>
+        </div>
       </div>
 
       {/* Filters Section - No Cancelled Filter */}
@@ -386,6 +457,17 @@ export default function OrderList() {
           >
             Ready ({readyCount})
           </button>
+          <button
+            onClick={() => setFilter("cancelled")}
+            className={`px-4 py-2 rounded-full font-medium transition-all ${
+              filter === "cancelled"
+                ? "bg-red-500 text-white shadow-md"
+                : "bg-white text-gray-700 hover:bg-gray-50 shadow-sm"
+            }`}
+          >
+            Cancelled ({cancelledCount})
+          </button>
+
         </div>
         <div className="flex items-center gap-2 bg-white rounded-lg p-2 shadow-sm">
           <Filter size={18} className="text-gray-500" />
@@ -404,7 +486,7 @@ export default function OrderList() {
       </div>
 
       {/* Loading State */}
-      {loading && activeOrders.length === 0 && (
+      {loading && processedOrders.length === 0 && (
         <div className="text-center py-16">
           <RefreshCw
             size={48}
@@ -417,22 +499,32 @@ export default function OrderList() {
       {/* Orders Grid */}
       {!loading && (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            <AnimatePresence>
-              {filteredAndSortedOrders.map((order) => {
+          <div ref={elementRef} className="relative w-full -mx-3">
+              <div className="sizer-element w-full md:w-1/2 xl:w-1/3 px-3"></div> {/* Sizer for Shuffle */}
+              {processedOrders.map((order) => {
                 const statusColor = getStatusColor(order.status);
                 const statusLineColor = getStatusLineColor(order.status);
+                
+                // Map status to groups for Shuffle
+                let groups = [order.status];
+                if (order.status === 'completed') groups.push('ready');
 
                 return (
-                  <motion.div
+                  <div
                     key={order.id}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    transition={{ duration: 0.2 }}
-                    whileHover={{ y: -4 }}
-                    className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100"
+                    className="shuffle-item w-full md:w-1/2 xl:w-1/3 px-3"
+                    data-groups={JSON.stringify(groups)}
+                    data-date-created={order.date}
+                    data-timestamp={order.timestamp}
+                    data-token={order.token}
+                    data-status={order.status}
+                    data-amount={order.grand_total}
+                    style={{ marginBottom: '24px' }} // Remove width: 100%, handled by CSS/classes
                   >
+
+                   <div 
+                    className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100 hover:-translate-y-1 transition-transform duration-200"
+                   >
                     {/* Order Status Header */}
                     <div className={`h-2 w-full ${statusLineColor}`}></div>
                     <div className="p-6 flex flex-col h-full">
@@ -441,7 +533,11 @@ export default function OrderList() {
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <h2 className="font-bold text-xl text-gray-900">
-                              Token No: {order.token}
+                              {order.restaurantType === "TABLE" && order.tableNumber ? (
+                                <>Table No: {order.tableNumber}</>
+                              ) : (
+                                <>Token No: {order.token}</>
+                              )}
                             </h2>
                             <span
                               className={`px-2 py-1 text-xs font-bold rounded-full ${statusColor.bg} ${statusColor.text}`}
@@ -579,23 +675,14 @@ export default function OrderList() {
 
                       {/* Action Buttons */}
                       <div className="mt-auto space-y-2">
-                        {/* Old Mark as Ready Button Removed */}
-                        {order.status === "completed" && (
-                          <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="w-full bg-linear-to-r from-green-100 to-emerald-100 border border-green-200 text-green-800 py-3 rounded-xl text-center font-bold flex items-center justify-center gap-2"
-                          >
-                            <Package size={20} />
-                            Ready for Pickup
-                          </motion.div>
-                        )}
+
+
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
+                  </div>
                 );
               })}
-            </AnimatePresence>
           </div>
 
           {/* Load More Button */}
@@ -613,7 +700,7 @@ export default function OrderList() {
           )}
 
           {/* Empty State */}
-          {filteredAndSortedOrders.length === 0 && !loading && (
+          {processedOrders.length === 0 && !loading && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -639,7 +726,7 @@ export default function OrderList() {
       <div className="mt-10 text-center text-gray-500 text-sm">
         <p>
           Kitchen Dashboard • Auto-refreshes every 30 seconds • Showing{" "}
-          {activeOrders.length} active orders
+          {processedOrders.length} active orders
         </p>
         <p className="mt-1">
           Last updated:{" "}

@@ -199,6 +199,7 @@ const Dashboard = () => {
     
     dashboardData.recent_orders.forEach(order => {
       order.items.forEach(item => {
+        if (item.status === "CANCELLED") return; // Skip cancelled items
         const category = `Category ${item.product.category_id || '0'}`;
         if (!categoryCount[category]) {
           categoryCount[category] = 0;
@@ -222,6 +223,7 @@ const Dashboard = () => {
     
     dashboardData.recent_orders.forEach(order => {
       order.items.forEach(item => {
+        if (item.status === "CANCELLED") return; // Skip cancelled items
         const productName = item.product.name;
         if (!itemCount[productName]) {
           itemCount[productName] = {
